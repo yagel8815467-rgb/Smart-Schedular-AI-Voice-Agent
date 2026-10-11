@@ -1,81 +1,111 @@
-# Voice-based Smart Scheduler Agent
+# Smart Scheduler AI Voice Agent
 
-A conversational AI assistant that helps users schedule meetings with "Harsimran Singh" by interacting with Google Calendar. The agent uses natural language understanding to collect meeting details, check calendar availability, and book meetings, all through a chat interface.
+A voice-enabled scheduling assistant that books meetings on Google Calendar through a chat interface. You can type or speak a request; the agent checks free time, asks for any missing details, and creates the event.
 
----
-## Demo Video 
-LINK :- https://www.youtube.com/watch?v=cFaSo3wm_JQ
-## Tech Stack
+Demo: https://www.youtube.com/watch?v=cFaSo3wm_JQ
 
-- **Python**: Core programming language.
-- **LangChain**: For building conversational agents and prompt management.
-- **Google Generative AI (Gemini)**: For LLM-powered conversation.
-- **Google Calendar API**: For checking availability and scheduling meetings.
-- **dotenv**: For environment variable management.
-- **Pandas, NumPy**: For data handling (minimal use).
-- **OAuth2**: For secure Google Calendar access.
+## What it does
 
----
+- Talks through a browser chat at `/`.
+- Accepts spoken input with the browser speech API (`en-IN`).
+- Reads replies aloud with Edge TTS (`en-US-JennyNeural`).
+- Keeps the conversation in memory so follow-up messages stay in context.
+- Checks busy times on the primary Google Calendar and books a meeting once it has a name, email, and time.
+- Uses `Asia/Kolkata` (`+05:30`) for event times.
 
-## Data Flow
+The assistant is set up to schedule meetings with Harsimran Singh. That name, the calendar, and the booking rules live in the system prompt in `agent.py`.
 
-1. **User Input**: User sends a scheduling request via chat.
-2. **Conversation Memory**: The agent maintains chat history for context.
-3. **Intent Recognition**: The LLM interprets user intent (e.g., check slots, book meeting).
-4. **Tool Invocation**:
-    - If checking availability: Calls `check_slots` tool, which queries Google Calendar for free/busy times.
-    - If booking: Calls `add_meet` tool, which creates a new event in Google Calendar.
-5. **Google Calendar API**: Handles authentication and actual calendar operations.
-6. **Response Generation**: The agent responds with available slots, booking confirmation, or requests for missing details.
-7. **User Receives Output**: The user sees the agent's response in the chat interface.
+## Stack
 
----
+- **FastAPI** serves the page and the `/chat` and `/tts` endpoints.
+- **LangChain** runs a tool-calling agent with conversation memory.
+- **Google Gemini** (`gemini-2.5-flash-preview-05-20`) handles the dialogue.
+- **Google Calendar API** reads free/busy data and inserts events.
+- **edge-tts** turns agent replies into MP3 audio.
 
-## Data Flow Diagram
+## Project layout
+
+```
+main.py              FastAPI app: chat, text-to-speech, and the HTML page
+agent.py             Calendar tools, prompt, and the LangChain agent
+templates/index.html Chat UI, microphone, and speaker button
+.env                 GOOGLE_API_KEY (not committed)
+credentials.json     Google OAuth client secrets
+token.json           Saved OAuth token, created on first calendar login
+```
+
+## Setup
+
+1. Use Python 3.10 or newer.
+
+2. Install the packages the app imports:
+
+```bash
+pip install fastapi uvicorn edge-tts python-dotenv pandas numpy langchain langchain-google-genai google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+```
+
+3. Create a `.env` file in the project root:
+
+```
+GOOGLE_API_KEY=your_gemini_api_key
+```
+
+4. In Google Cloud Console, enable the Google Calendar API and create an OAuth client of type **Desktop app**. Download the client JSON and save it as `credentials.json` in the project root.
+
+5. Start the server:
+
+```bash
+uvicorn main:app --reload
+```
+
+6. Open http://127.0.0.1:8000.
+
+The first time the agent calls the calendar, a browser window opens for Google sign-in. After you approve access, the app writes `token.json` and reuses it on later runs.
+
+Keep `.env`, `credentials.json`, and `token.json` out of version control. They contain API keys and calendar access.
+
+## Using the chat
+
+1. Type a request, or click the microphone and speak. Speech recognition needs a browser that supports the Web Speech API, such as Chrome.
+2. The agent asks for the day, duration, name, and email if anything is missing.
+3. It offers up to three open times. If the requested window is busy, it suggests another day.
+4. After you confirm a slot, it creates the event on the primary calendar and sends the invite.
+5. Click the speaker on a reply to hear it.
+
+Example:
+
+```
+I want a 30 minute meeting next Monday afternoon.
+My name is Alex, email alex@example.com. Book 5:30 PM.
+```
+
+## API
+
+| Method | Path   | Body                         | Result                                      |
+|--------|--------|------------------------------|---------------------------------------------|
+| GET    | `/`    | —                            | Chat page                                   |
+| POST   | `/chat`| `{ "message": "..." }`       | `{ "response": "..." }`                     |
+| POST   | `/tts` | `{ "text": "..." }`          | `audio/mpeg` stream                         |
+
+## How a booking works
 
 ```mermaid
 flowchart TD
-    A["User"] -->|Chat Message| B["Agent (LangChain + Gemini)"]
-    B -->|Check/Book| C["Tool: check_slots / add_meet"]
-    C -->|API Call| D["Google Calendar API"]
-    D -->|Availability/Confirmation| C
-    C -->|Result| B
-    B -->|Response| A
-    B <--> E["Conversation Memory"]
+    A["Browser chat or microphone"] -->|POST /chat| B["FastAPI"]
+    B --> C["LangChain agent + Gemini"]
+    C -->|free/busy window| D["check_slots"]
+    C -->|name, email, time| E["add_meet"]
+    D --> F["Google Calendar"]
+    E --> F
+    F --> C
+    C --> B
+    B -->|text| A
+    A -->|POST /tts| G["edge-tts"]
+    G -->|MP3| A
 ```
 
----
-
-## Setup & Usage
-
-1. **Clone the repository** and install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-2. **Set up environment variables** in a `.env` file:
-    - `GOOGLE_API_KEY`
-    - Any other required keys.
-3. **Google Calendar API**:
-    - Place your `credentials.json` in the project root.
-    - The first run will prompt for Google authentication and create `token.json`.
-4. **Run the agent**:
-    ```bash
-    python main.py
-    ```
-5. **Interact via the web interface** (if Flask is used) or command line.
-
----
-
-## Features
-
-- Conversational scheduling with context retention.
-- Suggests best available time slots.
-- Books meetings only after collecting all required details (name, email, time).
-- Handles authentication and token refresh for Google Calendar.
-- Customizable for other users or calendars.
-
----
+`check_slots` queries free/busy between `start_time` and `end_time`. An empty busy list means that window is open. `add_meet` inserts the event and emails the attendee.
 
 ## License
 
-MIT License 
+[CC0 1.0 Universal](License).
